@@ -1,9 +1,18 @@
 import { Hono } from 'hono'
 import { jsx } from 'hono/jsx'
-import { html } from 'hono/html'
+import { html, raw } from 'hono/html'
 import * as cheerio from 'cheerio'
 
 const app = new Hono()
+
+// --- JMA Data Location Info ---
+const LOCATIONS = {
+    "47430": {"name": "函館", "prec_no": "23", "type": "s1"},
+    "0147": {"name": "川汲", "prec_no": "23", "type": "a1"},
+    "1462": {"name": "高松", "prec_no": "23", "type": "a1"},
+    "1543": {"name": "戸井泊", "prec_no": "23", "type": "a1"}
+};
+const URL_TEMPLATE = "https://www.data.jma.go.jp/stats/etrn/view/daily_{url_type}.php?prec_no={prec_no}&block_no={block_no}&year={year}&month={month}&day=&view=";
 
 // --- Layout Component ---
 const Layout = (props) => html`<!DOCTYPE html>
@@ -235,54 +244,47 @@ const MultiPage = () => (
         </div>
         <div className="four-columns" id="panels-container">
         </div>
+        <div id="locations-data" style="display:none;">{JSON.stringify(LOCATIONS)}</div>
       </div>
       <script>
       {
           html`
-          let locationsData = {};
-          let allBlockNos = [];
-          let currentSelections = [];
           const charts = {};
-          let pickersInitialized = false;
-          async function fetchData(dateStr, blockNo, panelNumber) {
-              showLoading(panelNumber);
-              try {
-                  const response = await fetch('/api/precipitation?date=' + dateStr + '&block_no=' + blockNo);
-                  const data = await response.json();
-                  if (response.ok) {
-                      if (Object.keys(locationsData).length === 0 && data.locations) {
-                          locationsData = data.locations;
-                          allBlockNos = Object.keys(locationsData);
-                          currentSelections = allBlockNos.slice(0, 4);
-                      }
-                      updateUI(data, panelNumber);
-                  } else {
-                      showError('Error: ' + data.error, panelNumber);
-                  }
-              } catch (error) {
-                  console.error("Error fetching data:", error);
-                  showError("データの取得に失敗しました。", panelNumber);
-              }
-          }
-          function showLoading(panelNumber) {
+
+          async function fetchDataForPanel(panelNumber) {
+              const date = document.getElementById('date-picker').value;
+              const blockNo = document.getElementById('location-picker-' + panelNumber).value;
+              
               const panel = document.getElementById('panel-' + panelNumber);
-              if (panel) {
-                  panel.querySelector('.info-box').innerHTML = '<div class="loading">データを読み込み中...</div>';
+              const infoBox = panel.querySelector('.info-box');
+              infoBox.innerHTML = '<div class="loading">データを読み込み中...</div>';
+
+              try {
+                  const response = await fetch('/api/precipitation?date=' + date + '&block_no=' + blockNo);
+                  if (!response.ok) {
+                      const errorData = await response.json().catch(() => ({ error: 'Failed to fetch data' }));
+                      throw new Error(errorData.error);
+                  }
+                  const data = await response.json();
+                  updateUI(data, panelNumber);
+              } catch (error) {
+                  console.error('Error fetching data for panel ' + panelNumber, error);
+                  showError(error.message, panelNumber);
               }
           }
+
           function showError(message, panelNumber) {
               const panel = document.getElementById('panel-' + panelNumber);
               if (panel) {
-                  panel.querySelector('.info-box').innerHTML = '<div class="error">' + message + '</div>';
+                  const infoBox = panel.querySelector('.info-box');
+                  if(infoBox) infoBox.innerHTML = '<div class="error">' + message + '</div>';
               }
           }
+
           function updateUI(data, panelNumber) {
-              if (!data || typeof data !== 'object') {
-                  showError("無効なデータを受信しました。", panelNumber);
-                  return;
-              }
               const panel = document.getElementById('panel-' + panelNumber);
               if (!panel) return;
+
               const infoBox = panel.querySelector('.info-box');
               infoBox.className = 'info-box'; // Reset classes
               const cond3 = data.total_3_days <= 3;
@@ -299,6 +301,7 @@ const MultiPage = () => (
               updateChart(data.labels, data.data, panelNumber);
               updateCalendar(data.base_date, data.labels, data.data, panelNumber);
           }
+
           function updateChart(labels, values, panelNumber) {
               const canvas = document.getElementById('precipitationChart-' + panelNumber);
               if (!canvas) return;
@@ -322,12 +325,16 @@ const MultiPage = () => (
                       responsive: true,
                       maintainAspectRatio: false,
                       scales: {
-                          y: { beginAtZero: true, title: { display: true, text: '降水量 (mm)' } },
+                          y: { 
+                              beginAtZero: true, 
+                              title: { display: true, text: '降水量 (mm)' }
+                          },
                           x: { title: { display: true, text: '日付' } }
                       }
                   }
               });
           }
+
           function updateCalendar(baseDateStr, labels, values, panelNumber) {
               const container = document.getElementById('calendar-container-' + panelNumber);
               if (!container) return;
@@ -340,6 +347,7 @@ const MultiPage = () => (
                   container.insertAdjacentHTML('afterbegin', createMonthCalendar(date.getFullYear(), date.getMonth(), dataMap, baseDateStr));
               }
           }
+
           function createMonthCalendar(year, month, dataMap, baseDateStr) {
               const monthName = year + '年 ' + (month + 1) + '月';
               const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -363,72 +371,62 @@ const MultiPage = () => (
               tableHTML += '</tr></tbody></table></div>';
               return tableHTML;
           }
-          function createLocationPanels() {
-              const container = document.getElementById('panels-container');
-              container.innerHTML = '';
-              for (let i = 0; i < 4; i++) {
-                  container.insertAdjacentHTML('beforeend', '<div class="location-panel" id="panel-' + (i + 1) + '"><div class="panel-header"><div class="panel-title">地点 ' + (i + 1) + '</div></div><div class="info-box"><div class="loading">...</div></div><div class="chart-container"><h3>過去30日間の降水量グラフ</h3><div style="height: 300px;"><canvas id="precipitationChart-' + (i + 1) + '"></canvas></div></div><div class="calendar-container"><h3>過去30日間の降水量カレンダー</h3><div id="calendar-container-' + (i + 1) + '"></div></div></div>');
-              }
-          }
-          function createLocationPickers() {
-              if (pickersInitialized || allBlockNos.length === 0) return;
-              const pickerContainer = document.getElementById('location-pickers');
-              pickerContainer.innerHTML = '';
-              for (let i = 0; i < 4; i++) {
-                  const select = document.createElement('select');
-                  select.id = 'location-picker-' + (i+1);
-                  select.innerHTML = createLocationOptions(currentSelections[i]);
-                  select.addEventListener('change', function() {
-                      currentSelections[i] = this.value;
-                      const selectedDate = document.getElementById('date-picker').value;
-                      if (selectedDate) fetchData(selectedDate, this.value, i + 1);
-                  });
-                  const label = document.createElement('label');
-                  label.htmlFor = select.id;
-                  label.textContent = '地点' + (i+1) + ':';
-                  pickerContainer.appendChild(label);
-                  pickerContainer.appendChild(select);
-              }
-              pickersInitialized = true;
-          }
-          function createLocationOptions(selectedBlockNo) {
-              return allBlockNos.map(blockNo => '<option value="' + blockNo + '" ' + (blockNo === selectedBlockNo ? 'selected' : '') + '>' + locationsData[blockNo].name + '</option>').join('');
-          }
-          async function initialize() {
+
+          document.addEventListener('DOMContentLoaded', () => {
               const datePicker = document.getElementById('date-picker');
               const yesterday = new Date();
               yesterday.setDate(yesterday.getDate() - 1);
               datePicker.value = yesterday.toISOString().split('T')[0];
-              createLocationPanels();
-              await fetchData(datePicker.value, '47430', 1);
-              createLocationPickers();
-              const fetches = [];
-              for (let i = 1; i < 4; i++) {
-                  fetches.push(fetchData(datePicker.value, currentSelections[i], i + 1));
-              }
-              await Promise.all(fetches);
-              datePicker.addEventListener('change', () => {
-                  const fetches = [];
-                  for (let i = 0; i < 4; i++) {
-                      fetches.push(fetchData(datePicker.value, currentSelections[i], i + 1));
+              
+              const dataEl = document.getElementById('locations-data');
+              const locationsData = JSON.parse(dataEl.textContent || '{}');
+              const allBlockNos = Object.keys(locationsData);
+              const pickerContainer = document.getElementById('location-pickers');
+              const panelsContainer = document.getElementById('panels-container');
+
+              for (let i = 1; i <= 4; i++) {
+                  const panelId = 'panel-' + i;
+                  const pickerId = 'location-picker-' + i;
+                  const initialSelection = allBlockNos[i-1] || allBlockNos[0];
+
+                  panelsContainer.insertAdjacentHTML('beforeend', '<div class="location-panel" id="' + panelId + '"><div class="panel-header"><div class="panel-title">地点 ' + i + '</div></div><div class="info-box"><div class="loading">...</div></div><div class="chart-container"><h3>過去30日間の降水量グラフ</h3><div style="height: 300px;"><canvas id="precipitationChart-' + i + '"></canvas></div></div><div class="calendar-container" id="calendar-container-' + i + '"></div></div>');
+
+                  const label = document.createElement('label');
+                  label.htmlFor = pickerId;
+                  label.textContent = '地点' + i + ':';
+                  
+                  const select = document.createElement('select');
+                  select.id = pickerId;
+                  for(const blockNo of allBlockNos) {
+                      const option = document.createElement('option');
+                      option.value = blockNo;
+                      option.textContent = locationsData[blockNo].name;
+                      if (blockNo === initialSelection) {
+                          option.selected = true;
+                      }
+                      select.appendChild(option);
                   }
-              });
-          }
-          document.addEventListener('DOMContentLoaded', initialize);
+                  
+                  select.addEventListener('change', () => fetchDataForPanel(i));
+
+                  pickerContainer.appendChild(label);
+                  pickerContainer.appendChild(select);
+              }
+
+              const handleAllUpdates = () => {
+                  for (let i = 1; i <= 4; i++) {
+                      fetchDataForPanel(i);
+                  }
+              }
+
+              datePicker.addEventListener('change', handleAllUpdates);
+              handleAllUpdates(); // Initial fetch
+          });
           `
       }
       </script>
     </Layout>
 )
-
-// --- JMA Data Location Info ---
-const LOCATIONS = {
-    "47430": {"name": "函館", "prec_no": "23", "type": "s1"},
-    "0147": {"name": "川汲", "prec_no": "23", "type": "a1"},
-    "1462": {"name": "高松", "prec_no": "23", "type": "a1"},
-    "1543": {"name": "戸井泊", "prec_no": "23", "type": "a1"}
-};
-const URL_TEMPLATE = "https://www.data.jma.go.jp/stats/etrn/view/daily_{url_type}.php?prec_no={prec_no}&block_no={block_no}&year={year}&month={month}&day=&view=";
 
 // --- Data Fetching Logic ---
 async function getPrecipitationData(year, month, prec_no, block_no, url_type) {

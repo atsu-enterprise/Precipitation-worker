@@ -21,9 +21,9 @@ const Layout = (props) => html`<!DOCTYPE html>
         .form-container { margin-bottom: 2em; display: flex; flex-wrap: wrap; align-items: center; gap: 1em; }
         .form-container label { font-weight: bold; }
         .form-container input[type="date"], .form-container select { padding: 0.5em; border: 1px solid #ccc; border-radius: 4px; }
-        .info-box { background-color: #e7f3fe; border-left: 6px solid #4a90e2; margin: 1em 0; padding: 0.5em 1em; }
+        .info-box { background-color: #e7f3fe; border-left: 6px solid #4a90e2; margin: 1em 0; padding: 0.5em 1em; transition: all 0.3s ease; }
         .calendar-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 2em; margin-top: 2em; }
-        .calendar-table { border-collapse: collapse; width: 100%; }
+        .calendar-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
         .calendar-table th, .calendar-table td { border: 1px solid #ddd; width: 14.28%; text-align: center; vertical-align: top; height: 70px; }
         .calendar-table th { background-color: #f2f2f2; padding: 8px 0; }
         .calendar-table td { padding: 4px; }
@@ -41,6 +41,11 @@ const Layout = (props) => html`<!DOCTYPE html>
         .panel-title { font-size: 1.1em; font-weight: bold; margin-bottom: 0.5em; color: #4a90e2; }
         .error { color: #d32f2f; background-color: #ffebee; padding: 0.5em; border-radius: 4px; margin: 0.5em 0; }
         .loading { color: #666; font-style: italic; }
+        .highlight-3 { background-color: #fffbe6; border-left-color: #f59e0b; }
+        .highlight-30 { background-color: #eff6ff; border-left-color: #3b82f6; }
+        .highlight-both { background-color: #fef2f2; border-left-color: #ef4444; font-weight: bold; }
+        .info-box.highlight-3 strong, .info-box.highlight-30 strong { color: #b45309; }
+        .info-box.highlight-both strong { color: #b91c1c; font-size: 1.05em; }
       </style>
     </head>
     <body>
@@ -60,7 +65,7 @@ const IndexPage = () => (
         <input type="date" id="date-picker" />
       </div>
       <div id="results">
-        <div className="info-box">
+        <div id="info-box" className="info-box">
           <h2 id="location">場所: ...</h2>
           <p>基準日: <strong id="base-date">...</strong></p>
           <p>基準日までの3日間の合計雨量: <strong id="total-3-days">... mm</strong></p>
@@ -109,8 +114,21 @@ const IndexPage = () => (
             updateLocationPicker(data.locations, blockNo);
             document.getElementById('location').textContent = '場所: ' + data.location;
             document.getElementById('base-date').textContent = data.base_date;
-            document.getElementById('total-3-days').textContent = data.total_3_days + ' mm';
-            document.getElementById('total-30-days').textContent = data.total_30_days + ' mm';
+            document.getElementById('total-3-days').textContent = data.total_3_days.toFixed(1) + ' mm';
+            document.getElementById('total-30-days').textContent = data.total_30_days.toFixed(1) + ' mm';
+
+            const infoBox = document.getElementById('info-box');
+            infoBox.className = 'info-box'; // Reset classes
+            const cond3 = data.total_3_days <= 3;
+            const cond30 = data.total_30_days <= 30;
+            if (cond3 && cond30) {
+                infoBox.classList.add('highlight-both');
+            } else if (cond3) {
+                infoBox.classList.add('highlight-3');
+            } else if (cond30) {
+                infoBox.classList.add('highlight-30');
+            }
+
             updateChart(data.labels, data.data);
             updateCalendar(data.base_date, data.labels, data.data);
         }
@@ -266,7 +284,18 @@ const MultiPage = () => (
               const panel = document.getElementById('panel-' + panelNumber);
               if (!panel) return;
               const infoBox = panel.querySelector('.info-box');
-              infoBox.innerHTML = '<h2>場所: ' + data.location + '</h2><p>基準日: <strong>' + data.base_date + '</strong></p><p>基準日までの3日間の合計雨量: <strong>' + data.total_3_days + ' mm</strong></p><p>基準日までの30日間の合計雨量: <strong>' + data.total_30_days + ' mm</strong></p>';
+              infoBox.className = 'info-box'; // Reset classes
+              const cond3 = data.total_3_days <= 3;
+              const cond30 = data.total_30_days <= 30;
+              if (cond3 && cond30) {
+                  infoBox.classList.add('highlight-both');
+              } else if (cond3) {
+                  infoBox.classList.add('highlight-3');
+              } else if (cond30) {
+                  infoBox.classList.add('highlight-30');
+              }
+
+              infoBox.innerHTML = '<h2>場所: ' + data.location + '</h2><p>基準日: <strong>' + data.base_date + '</strong></p><p>基準日までの3日間の合計雨量: <strong>' + data.total_3_days.toFixed(1) + ' mm</strong></p><p>基準日までの30日間の合計雨量: <strong>' + data.total_30_days.toFixed(1) + ' mm</strong></p>';
               updateChart(data.labels, data.data, panelNumber);
               updateCalendar(data.base_date, data.labels, data.data, panelNumber);
           }
@@ -498,8 +527,8 @@ app.get('/api/precipitation', async (c) => {
     return c.json({
         location: location_name,
         base_date: baseDateStr,
-        total_3_days: total_3_days.toFixed(1),
-        total_30_days: total_30_days.toFixed(1),
+        total_3_days: total_3_days,
+        total_30_days: total_30_days,
         labels: labels,
         data: precip_list,
         locations: LOCATIONS 

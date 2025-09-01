@@ -1,4 +1,4 @@
-name = "precipitation-worker"
+name = "precipitation"
 main = "src/index.js"
 compatibility_date = "2025-07-18"
 

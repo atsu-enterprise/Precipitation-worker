@@ -456,14 +456,18 @@ function parseData(html_content, url_type) {
     const table = $('#tablefix1');
     if (!table.length) return {};
     const precip_col_index = url_type === 's1' ? 3 : 1;
+    const data_start_row = url_type === 's1' ? 4 : 3; // typeに応じて開始行を変更
     const data = {};
-    table.find('tr').slice(4).each((i, row) => {
+    table.find('tr').slice(data_start_row).each((i, row) => {
         const cols = $(row).find('td');
         if (cols.length > precip_col_index && /^\d+$/.test($(cols[0]).text().trim())) {
             try {
                 const day = parseInt($(cols[0]).text().trim(), 10);
-                const precipitation_text = $(cols[precip_col_index]).text().trim().replace('--', '0').replace(')', '').replace(']', '');
-                const precipitation = (precipitation_text && precipitation_text !== "") ? parseFloat(precipitation_text) : 0.0;
+                let precipitation_text = $(cols[precip_col_index]).text().trim();
+                precipitation_text = precipitation_text.replace('--', '0');
+                const matched = precipitation_text.match(/[\d.]+/);
+                const precipitation = matched ? parseFloat(matched[0]) : 0.0;
+
                 if(!isNaN(precipitation)){
                     data[day] = precipitation;
                 }
